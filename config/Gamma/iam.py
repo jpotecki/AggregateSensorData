@@ -14,7 +14,7 @@ def get_dynamodb_access() -> Policy:
     awacs.aws.Statement(
       Action = [ GetItem, GetRecords, Scan, Query ],
       Effect = awacs.aws.Allow,
-      Resource = [ Sub("arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/iotaggregatedsensordata-gamma") ]
+      Resource = [ Sub("arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/IoTSensorDataGamma") ]
     )
   ]
   policyDoc = awacs.aws.Policy( Statement = statements )
@@ -28,7 +28,7 @@ def get_s3_access() -> Policy:
     awacs.aws.Statement(
       Action = [ s3.PutObject, s3.PutObjectAcl ],
       Effect = awacs.aws.Allow,
-      Resource = [ "arn:aws:s3:::iotweatherdata-gamma/*" ]
+      Resource = [ "arn:aws:s3:::iotaggregatedsensordata-gamma/*" ]
     )
   ]
   policyDoc = awacs.aws.Policy( Statement = statements )

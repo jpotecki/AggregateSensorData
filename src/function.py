@@ -31,11 +31,12 @@ def putS3(bucket: str, key: str, data: str, readers: List[str]) -> dict:
                         , GrantRead = readers
                         )
 
-def get_time_boundaries() -> Tuple[datetime, datetime]:
+def get_time_boundaries() -> Tuple[str, str]:
     today = datetime.utcnow().date()
     start = datetime(today.year, today.month, today.day, tzinfo=tz.tzutc())
     end = start + timedelta(1)
-    return [start, end]
+    return [str(start.timestamp()), str(end.timestamp())]
+
     
 def query(start: str, end: str, table_name: str) -> dict:
     return boto3.resource("dynamodb").Table(table_name) \
