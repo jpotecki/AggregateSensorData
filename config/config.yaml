@@ -1,0 +1,4 @@
+Name: IoTAggregateSensorData
+Handler: function.lambda_handler
+Unittests:
+  Folder: test/unittest/

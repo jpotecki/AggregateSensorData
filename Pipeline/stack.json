@@ -1,0 +1,733 @@
+{
+  "Parameters": {
+    "GitHubBranch": {
+      "Description": "GitHub repository branch",
+      "Type": "String"
+    },
+    "GitHubOwner": {
+      "Description": "GitHub repository owner",
+      "Type": "String"
+    },
+    "GitHubRepo": {
+      "Description": "GitHub repository name",
+      "Type": "String"
+    },
+    "GitHubToken": {
+      "Description": "GitHub repository OAuth token",
+      "Type": "String"
+    }
+  },
+  "Resources": {
+    "ArtifactStoreS3Location": {
+      "Properties": {
+        "AccessControl": "Private"
+      },
+      "Type": "AWS::S3::Bucket"
+    },
+    "CFDeployRole": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "sts:AssumeRole"
+              ],
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "cloudformation.amazonaws.com"
+              }
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyDocument": {
+              "Statement": [
+                {
+                  "Action": [
+                    "ec2:*",
+                    "lambda:GetFunction",
+                    "lambda:CreateFunction",
+                    "lambda:GetFunctionConfiguration",
+                    "lambda:DeleteFunction",
+                    "lambda:UpdateFunctionCode",
+                    "lambda:UpdateFunctionConfiguration",
+                    "lambda:CreateAlias",
+                    "lambda:DeleteAlias",
+                    "s3:GetObject"
+                  ],
+                  "Effect": "Allow",
+                  "Resource": [
+                    "*"
+                  ]
+                },
+                {
+                  "Action": [
+                    "iam:DeleteRole",
+                    "iam:DeleteRolePolicy",
+                    "iam:GetRole",
+                    "iam:PutRolePolicy",
+                    "iam:CreateRole",
+                    "iam:PassRole"
+                  ],
+                  "Effect": "Allow",
+                  "Resource": [
+                    "*"
+                  ]
+                }
+              ]
+            },
+            "PolicyName": "CloudFormationDeployPolicy"
+          }
+        ],
+        "RoleName": {
+          "Fn::Sub": "${AWS::StackName}-CFDeployRole"
+        }
+      },
+      "Type": "AWS::IAM::Role"
+    },
+    "CodeBuildRole": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "sts:AssumeRole"
+              ],
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "codebuild.amazonaws.com"
+              }
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyDocument": {
+              "Statement": [
+                {
+                  "Action": [
+                    "*"
+                  ],
+                  "Effect": "Allow",
+                  "Resource": [
+                    "*"
+                  ]
+                }
+              ]
+            },
+            "PolicyName": {
+              "Fn::Sub": "${AWS::StackName}-CodeBuildPolicy"
+            }
+          }
+        ],
+        "RoleName": {
+          "Fn::Sub": "${AWS::StackName}-LambdaCodeBuildRole"
+        }
+      },
+      "Type": "AWS::IAM::Role"
+    },
+    "DeployPkgBuilder": {
+      "Properties": {
+        "Artifacts": {
+          "Type": "CODEPIPELINE"
+        },
+        "Environment": {
+          "ComputeType": "BUILD_GENERAL1_SMALL",
+          "Image": "frolvlad/alpine-python3",
+          "PrivilegedMode": "false",
+          "Type": "LINUX_CONTAINER"
+        },
+        "Name": {
+          "Fn::Sub": "${AWS::StackName}-DeployPkgBuilder"
+        },
+        "ServiceRole": {
+          "Ref": "CodeBuildRole"
+        },
+        "Source": {
+          "BuildSpec": {
+            "Fn::Join": [
+              "\n",
+              [
+                "version: 0.2",
+                "phases:",
+                "  install:",
+                "    commands:",
+                "      - pip3 install --upgrade pip setuptools",
+                "  build:",
+                "    commands:",
+                "      - pip3 install -r requirements.txt -t .",
+                "      - ls -a",
+                "      - mv -v src/* .",
+                "      - rm -rf src",
+                "      - rm -rf config",
+                "      - rm -rf test",
+                "      - ls -a",
+                "artifacts:",
+                "  type: zip",
+                "  files:",
+                "    - '**/*'"
+              ]
+            ]
+          },
+          "Type": "CODEPIPELINE"
+        }
+      },
+      "Type": "AWS::CodeBuild::Project"
+    },
+    "FunctionsPipeline": {
+      "Properties": {
+        "ArtifactStore": {
+          "Location": {
+            "Ref": "ArtifactStoreS3Location"
+          },
+          "Type": "S3"
+        },
+        "Name": {
+          "Fn::Sub": "${AWS::StackName}-Pipeline"
+        },
+        "RoleArn": {
+          "Fn::GetAtt": [
+            "PipelineRole",
+            "Arn"
+          ]
+        },
+        "Stages": [
+          {
+            "Actions": [
+              {
+                "ActionTypeId": {
+                  "Category": "Source",
+                  "Owner": "ThirdParty",
+                  "Provider": "GitHub",
+                  "Version": "1"
+                },
+                "Configuration": {
+                  "Branch": {
+                    "Ref": "GitHubBranch"
+                  },
+                  "OAuthToken": {
+                    "Ref": "GitHubBranch"
+                  },
+                  "Owner": {
+                    "Ref": "GitHubOwner"
+                  },
+                  "PollForSourceChanges": "true",
+                  "Repo": {
+                    "Ref": "GitHubRepo"
+                  }
+                },
+                "Name": {
+                  "Fn::Sub": "${AWS::StackName}-LambdaSource"
+                },
+                "OutputArtifacts": [
+                  {
+                    "Name": "SourceCode"
+                  }
+                ],
+                "RunOrder": "1"
+              }
+            ],
+            "Name": "Source"
+          },
+          {
+            "Actions": [
+              {
+                "ActionTypeId": {
+                  "Category": "Build",
+                  "Owner": "AWS",
+                  "Provider": "CodeBuild",
+                  "Version": "1"
+                },
+                "Configuration": {
+                  "ProjectName": {
+                    "Ref": "unittestBuilder"
+                  }
+                },
+                "InputArtifacts": [
+                  {
+                    "Name": "SourceCode"
+                  }
+                ],
+                "Name": {
+                  "Fn::Sub": "${AWS::StackName}-UnittestAction1"
+                },
+                "RunOrder": "1"
+              }
+            ],
+            "Name": "Unittests"
+          },
+          {
+            "Actions": [
+              {
+                "ActionTypeId": {
+                  "Category": "Build",
+                  "Owner": "AWS",
+                  "Provider": "CodeBuild",
+                  "Version": "1"
+                },
+                "Configuration": {
+                  "ProjectName": {
+                    "Ref": "DeployPkgBuilder"
+                  }
+                },
+                "InputArtifacts": [
+                  {
+                    "Name": "SourceCode"
+                  }
+                ],
+                "Name": {
+                  "Fn::Sub": "${AWS::StackName}-BuildAction1"
+                },
+                "OutputArtifacts": [
+                  {
+                    "Name": "FunctionDeployPackage"
+                  }
+                ],
+                "RunOrder": "1"
+              },
+              {
+                "ActionTypeId": {
+                  "Category": "Build",
+                  "Owner": "AWS",
+                  "Provider": "CodeBuild",
+                  "Version": "1"
+                },
+                "Configuration": {
+                  "ProjectName": {
+                    "Ref": "cfBuilder"
+                  }
+                },
+                "InputArtifacts": [
+                  {
+                    "Name": "SourceCode"
+                  }
+                ],
+                "Name": {
+                  "Fn::Sub": "${AWS::StackName}-BuildAction2"
+                },
+                "OutputArtifacts": [
+                  {
+                    "Name": "CfOutputTemplate"
+                  }
+                ],
+                "RunOrder": "2"
+              }
+            ],
+            "Name": "Build"
+          },
+          {
+            "Actions": [
+              {
+                "ActionTypeId": {
+                  "Category": "Deploy",
+                  "Owner": "AWS",
+                  "Provider": "CloudFormation",
+                  "Version": "1"
+                },
+                "Configuration": {
+                  "ActionMode": "CREATE_UPDATE",
+                  "Capabilities": "CAPABILITY_NAMED_IAM",
+                  "ParameterOverrides": "{\"S3Key\": {\"Fn::GetArtifactAtt\": [\"FunctionDeployPackage\", \"ObjectKey\"]}, \"S3Storage\": {\"Fn::GetArtifactAtt\": [\"FunctionDeployPackage\", \"BucketName\"]}}",
+                  "RoleArn": {
+                    "Fn::GetAtt": [
+                      "CFDeployRole",
+                      "Arn"
+                    ]
+                  },
+                  "StackName": {
+                    "Fn::Sub": "${AWS::StackName}FunctionsGamma"
+                  },
+                  "TemplatePath": "CfOutputTemplate::stackGamma.json"
+                },
+                "InputArtifacts": [
+                  {
+                    "Name": "CfOutputTemplate"
+                  },
+                  {
+                    "Name": "FunctionDeployPackage"
+                  }
+                ],
+                "Name": "DeployGamma",
+                "RunOrder": "1"
+              }
+            ],
+            "Name": "Gamma"
+          },
+          {
+            "Actions": [
+              {
+                "ActionTypeId": {
+                  "Category": "Deploy",
+                  "Owner": "AWS",
+                  "Provider": "CloudFormation",
+                  "Version": "1"
+                },
+                "Configuration": {
+                  "ActionMode": "CREATE_UPDATE",
+                  "Capabilities": "CAPABILITY_NAMED_IAM",
+                  "ParameterOverrides": "{\"S3Key\": {\"Fn::GetArtifactAtt\": [\"FunctionDeployPackage\", \"ObjectKey\"]}, \"S3Storage\": {\"Fn::GetArtifactAtt\": [\"FunctionDeployPackage\", \"BucketName\"]}}",
+                  "RoleArn": {
+                    "Fn::GetAtt": [
+                      "CFDeployRole",
+                      "Arn"
+                    ]
+                  },
+                  "StackName": {
+                    "Fn::Sub": "${AWS::StackName}FunctionsPROD"
+                  },
+                  "TemplatePath": "CfOutputTemplate::stackPROD.json"
+                },
+                "InputArtifacts": [
+                  {
+                    "Name": "CfOutputTemplate"
+                  },
+                  {
+                    "Name": "FunctionDeployPackage"
+                  }
+                ],
+                "Name": "DeployPROD",
+                "RunOrder": "1"
+              }
+            ],
+            "Name": "PROD"
+          }
+        ]
+      },
+      "Type": "AWS::CodePipeline::Pipeline"
+    },
+    "PipelineRole": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "sts:AssumeRole"
+              ],
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "codepipeline.amazonaws.com"
+              }
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyDocument": {
+              "Statement": [
+                {
+                  "Action": [
+                    "s3:GetObject",
+                    "s3:GetObjectVersion",
+                    "s3:GetBucketVersioning"
+                  ],
+                  "Effect": "Allow",
+                  "Resource": [
+                    "*"
+                  ]
+                },
+                {
+                  "Action": [
+                    "s3:PutObject"
+                  ],
+                  "Effect": "Allow",
+                  "Resource": [
+                    "arn:aws:s3:::codepipeline*",
+                    "arn:aws:s3:::elasticbeanstalk*"
+                  ]
+                },
+                {
+                  "Action": [
+                    "codecommit:CancelUploadArchive",
+                    "codecommit:GetBranch",
+                    "codecommit:GetCommit",
+                    "codecommit:GetUploadArchiveStatus",
+                    "codecommit:UploadArchive"
+                  ],
+                  "Effect": "Allow",
+                  "Resource": [
+                    "*"
+                  ]
+                },
+                {
+                  "Action": [
+                    "codedeploy:CreateDeployment",
+                    "codedeploy:GetApplicationRevision",
+                    "codedeploy:GetDeployment",
+                    "codedeploy:GetDeploymentConfig",
+                    "codedeploy:RegisterApplicationRevision"
+                  ],
+                  "Effect": "Allow",
+                  "Resource": [
+                    "*"
+                  ]
+                },
+                {
+                  "Action": [
+                    "elasticbeanstalk:*",
+                    "ec2:*",
+                    "elasticloadbalancing:*",
+                    "autoscaling:*",
+                    "cloudwatch:*",
+                    "s3:*",
+                    "sns:*",
+                    "cloudformation:*",
+                    "rds:*",
+                    "sqs:*",
+                    "ecs:*",
+                    "iam:PassRole"
+                  ],
+                  "Effect": "Allow",
+                  "Resource": [
+                    "*"
+                  ]
+                },
+                {
+                  "Action": [
+                    "lambda:InvokeFunction",
+                    "lambda:ListFunctions"
+                  ],
+                  "Effect": "Allow",
+                  "Resource": [
+                    "*"
+                  ]
+                },
+                {
+                  "Action": [
+                    "opsworks:CreateDeployment",
+                    "opsworks:DescribeApps",
+                    "opsworks:DescribeCommands",
+                    "opsworks:DescribeDeployments",
+                    "opsworks:DescribeInstances",
+                    "opsworks:DescribeStacks",
+                    "opsworks:UpdateApp",
+                    "opsworks:UpdateStack"
+                  ],
+                  "Effect": "Allow",
+                  "Resource": [
+                    "*"
+                  ]
+                },
+                {
+                  "Action": [
+                    "cloudformation:CreateStack",
+                    "cloudformation:DeleteStack",
+                    "cloudformation:DescribeStacks",
+                    "cloudformation:UpdateStack",
+                    "cloudformation:CreateChangeSet",
+                    "cloudformation:DeleteChangeSet",
+                    "cloudformation:DescribeChangeSet",
+                    "cloudformation:ExecuteChangeSet",
+                    "cloudformation:SetStackPolicy",
+                    "cloudformation:ValidateTemplate",
+                    "iam:PassRole"
+                  ],
+                  "Effect": "Allow",
+                  "Resource": [
+                    "*"
+                  ]
+                },
+                {
+                  "Action": [
+                    "codebuild:BatchGetBuilds",
+                    "codebuild:StartBuild"
+                  ],
+                  "Effect": "Allow",
+                  "Resource": [
+                    "*"
+                  ]
+                }
+              ]
+            },
+            "PolicyName": {
+              "Fn::Sub": "oneClickCodePipeServicePolicy-${AWS::StackName}"
+            }
+          }
+        ],
+        "RoleName": {
+          "Fn::Sub": "${AWS::StackName}PipelineRole"
+        }
+      },
+      "Type": "AWS::IAM::Role"
+    },
+    "UnittestRole": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "sts:AssumeRole"
+              ],
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "codebuild.amazonaws.com"
+              }
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyDocument": {
+              "Statement": [
+                {
+                  "Action": [
+                    "*"
+                  ],
+                  "Effect": "Allow",
+                  "Resource": [
+                    "*"
+                  ]
+                }
+              ]
+            },
+            "PolicyName": {
+              "Fn::Sub": "${AWS::StackName}-UnittestPolicy"
+            }
+          }
+        ],
+        "RoleName": {
+          "Fn::Sub": "${AWS::StackName}-UnittestRole"
+        }
+      },
+      "Type": "AWS::IAM::Role"
+    },
+    "cfBuilder": {
+      "Properties": {
+        "Artifacts": {
+          "Type": "CODEPIPELINE"
+        },
+        "Environment": {
+          "ComputeType": "BUILD_GENERAL1_SMALL",
+          "Image": "frolvlad/alpine-python3",
+          "PrivilegedMode": "false",
+          "Type": "LINUX_CONTAINER"
+        },
+        "Name": {
+          "Fn::Sub": "${AWS::StackName}-cfBuilder"
+        },
+        "ServiceRole": {
+          "Ref": "CodeBuildRole"
+        },
+        "Source": {
+          "BuildSpec": {
+            "Fn::Join": [
+              "\n",
+              [
+                "version: 0.2",
+                "\n",
+                "phases:",
+                "  install:",
+                "    commands:",
+                "      - apk add --no-cache bash git openssl",
+                "  pre_build:",
+                "    commands:",
+                "      - pip3 install troposphere",
+                "      - pip3 install awacs",
+                "      - git clone https://github.com/AwsLambdaContinuousDelivery/AwsLambdaContinuousDeliveryTools.git",
+                "      - cd AwsLambdaContinuousDeliveryTools",
+                "      - pip3 install .",
+                "      - cd ..",
+                "      - rm -rf AwsLambdaContinuousDeliveryTools",
+                "      - wget https://raw.githubusercontent.com/AwsLambdaContinuousDelivery/AwsLambdaContinuousDeliveryLambdaCfGenerator/v2/createCF.py",
+                "  build:",
+                "    commands:",
+                "\n",
+                {
+                  "Fn::Join": [
+                    "\n",
+                    [
+                      {
+                        "Fn::Join": [
+                          " ",
+                          [
+                            "      - python3 createCF.py --path $(pwd)/ --stage",
+                            "Gamma",
+                            "--stack",
+                            {
+                              "Fn::Sub": "${AWS::StackName}"
+                            },
+                            ">> stackGamma.json"
+                          ]
+                        ]
+                      },
+                      {
+                        "Fn::Join": [
+                          " ",
+                          [
+                            "      - python3 createCF.py --path $(pwd)/ --stage",
+                            "PROD --stack",
+                            {
+                              "Fn::Sub": "${AWS::StackName}"
+                            },
+                            ">> stackPROD.json"
+                          ]
+                        ]
+                      }
+                    ]
+                  ]
+                },
+                "\n",
+                {
+                  "Fn::Join": [
+                    "\n",
+                    [
+                      "artifacts:",
+                      "  files:",
+                      "    - stackPROD.json",
+                      "    - stackGamma.json"
+                    ]
+                  ]
+                }
+              ]
+            ]
+          },
+          "Type": "CODEPIPELINE"
+        }
+      },
+      "Type": "AWS::CodeBuild::Project"
+    },
+    "unittestBuilder": {
+      "Properties": {
+        "Artifacts": {
+          "Type": "CODEPIPELINE"
+        },
+        "Environment": {
+          "ComputeType": "BUILD_GENERAL1_SMALL",
+          "Image": "frolvlad/alpine-python3",
+          "PrivilegedMode": "false",
+          "Type": "LINUX_CONTAINER"
+        },
+        "Name": {
+          "Fn::Sub": "${AWS::StackName}-unittestBuilder"
+        },
+        "ServiceRole": {
+          "Ref": "UnittestRole"
+        },
+        "Source": {
+          "BuildSpec": {
+            "Fn::Join": [
+              "\n",
+              [
+                "version: 0.2",
+                "\n",
+                "phases:",
+                "  install:",
+                "    commands:",
+                "      - pip3 install -r requirements.txt",
+                "      - pip3 install pyyaml",
+                "  pre_build:",
+                "    commands:",
+                "      - wget https://raw.githubusercontent.com/AwsLambdaContinuousDelivery/pyAwsLambdaContinuousDeliveryUnittest/master/executable/testRunner.py",
+                "  build:",
+                "    commands:",
+                "      - python3 testRunner.py"
+              ]
+            ]
+          },
+          "Type": "CODEPIPELINE"
+        }
+      },
+      "Type": "AWS::CodeBuild::Project"
+    }
+  }
+}
