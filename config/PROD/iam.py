@@ -5,14 +5,14 @@ from awslambdacontinuousdelivery.tools.iam import (
 
 from troposphere import Sub
 from troposphere.iam import Role, Policy
-from awacs.dynamodb import GetItem, GetRecords, Scan, Query
+from awacs.dynamodb import GetItem, Scan, Query
 import awacs.aws
 import awacs.s3 as s3
 
 def get_dynamodb_access() -> Policy:
   statements = [
     awacs.aws.Statement(
-      Action = [ GetItem, GetRecords, Scan, Query ],
+      Action = [ GetItem, Scan, Query ],
       Effect = awacs.aws.Allow,
       Resource = [ Sub("arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/IoTSensorDataPROD") ]
     )

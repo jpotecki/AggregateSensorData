@@ -57,7 +57,4 @@ pipeline = Pipeline( "FunctionsPipeline"
 
 template.add_resource(pipeline)
 
-#topic = getEmailTopic("Failure Notification", "andy.jassy@amazon.com")
-#notification_role = addFailureNotifications(template, Ref(pipeline), topic)
-
 print(template.to_json(indent=2))
