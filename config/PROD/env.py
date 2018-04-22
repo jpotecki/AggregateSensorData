@@ -1,5 +1,5 @@
 def get_env() -> dict:
-  return { "bucket" : "iotaggregatedsensordata-prod"
+  return { "bucket" : "example-aggregatedsensordata-prod"
          , "table": "IotSensorDataPROD"
          }
 
