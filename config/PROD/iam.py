@@ -27,7 +27,7 @@ def get_s3_access() -> Policy:
     awacs.aws.Statement(
       Action = [ s3.PutObject, s3.PutObjectAcl ],
       Effect = awacs.aws.Allow,
-      Resource = [ "arn:aws:s3:::|example-aggregatedsensordata-prod/*" ]
+      Resource = [ "arn:aws:s3:::example-aggregatedsensordata-prod/*" ]
     )
   ]
   policyDoc = awacs.aws.Policy( Statement = statements )
